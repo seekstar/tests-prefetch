@@ -16,8 +16,13 @@ static inline void my_prefetcht2(const void *x) {
 	asm volatile("prefetcht2 %0" : : "m" (*(const char *)x));
 }
 
+// Used in NOVA
 static inline void my_clflush(const void *x) {
 	asm volatile("clflush %0" : "+m" (*(volatile char *)(x)));
+}
+
+static inline void my_clflush_ro(const void *x) {
+	asm volatile("clflush %0" : : "m" (*(volatile char *)(x)));
 }
 
 static inline uint64_t timespec_to_ns(const struct timespec *t) {
@@ -79,7 +84,60 @@ int main() {
 
 	uint64_t start64 = 0;
 	uint64_t prefetch_time = 0;
-	uint64_t memcpy_time = 0;
+	uint64_t memcmp_time = 0;
+	for (i = 0; i < SIZE; i += PAGE_SIZE) {
+		start64 = timestamp_ns();
+		for (j = 0; j < PAGE_SIZE; j += 64) {
+			my_prefetcht0(s + i + j);
+		}
+		prefetch_time += timestamp_ns() - start64;
+
+		start64 = timestamp_ns();
+		if (memcmp(buf, s + i, PAGE_SIZE) != 0) {
+			printf("WTF???\n");
+		}
+		memcmp_time += timestamp_ns() - start64;
+	}
+	printf("prefetcht0 + memcmp: For a page, prefetcht0: %f ns, memcmp: %f ns\n", (double)prefetch_time / (SIZE / PAGE_SIZE), (double)memcmp_time / (SIZE / PAGE_SIZE));
+
+	prefetch_time = 0;
+	memcmp_time = 0;
+	for (i = 0; i < SIZE - PAGE_SIZE; i += PAGE_SIZE) {
+		start64 = timestamp_ns();
+		for (j = 0; j < PAGE_SIZE; j += 64) {
+			my_prefetcht0(s + i + 1 + j);
+		}
+		prefetch_time += timestamp_ns() - start64;
+
+		start64 = timestamp_ns();
+		if (memcmp(buf, s + i, PAGE_SIZE) != 0) {
+			printf("WTF???\n");
+		}
+		memcmp_time += timestamp_ns() - start64;
+	}
+	printf("prefetcht0 next + memcmp: For a page, prefetcht0: %f ns, memcmp: %f ns\n", (double)prefetch_time / (SIZE / PAGE_SIZE), (double)memcmp_time / (SIZE / PAGE_SIZE));
+
+	prefetch_time = 0;
+	memcmp_time = 0;
+	for (i = 0; i < SIZE - PAGE_SIZE; i += PAGE_SIZE) {
+		start64 = timestamp_ns();
+		for (j = 0; j < PAGE_SIZE; j += 64) {
+			my_prefetcht0(s + i + 1 + j);
+		}
+		prefetch_time += timestamp_ns() - start64;
+
+		start64 = timestamp_ns();
+		for (j = 0; j < 8; ++j) {
+			if (memcmp(buf, s + i, PAGE_SIZE) != 0) {
+				printf("WTF???\n");
+			}
+		}
+		memcmp_time += timestamp_ns() - start64;
+	}
+	printf("prefetcht0 next + memcmp 8 times: For a page, prefetcht0: %f ns, memcmp: %f ns\n", (double)prefetch_time / (SIZE / PAGE_SIZE), (double)memcmp_time / (SIZE / PAGE_SIZE));
+
+	prefetch_time = 0;
+	memcmp_time = 0;
 	uint64_t clflush_time = 0;
 	for (i = 0; i < SIZE; i += PAGE_SIZE) {
 		start64 = timestamp_ns();
@@ -89,8 +147,10 @@ int main() {
 		prefetch_time += timestamp_ns() - start64;
 
 		start64 = timestamp_ns();
-		memcpy(buf, s + i, PAGE_SIZE);
-		memcpy_time += timestamp_ns() - start64;
+		if (memcmp(buf, s + i, PAGE_SIZE) != 0) {
+			printf("WTF???\n");
+		}
+		memcmp_time += timestamp_ns() - start64;
 
 		start64 = timestamp_ns();
 		for (j = 0; j < PAGE_SIZE; j += 64) {
@@ -98,7 +158,31 @@ int main() {
 		}
 		clflush_time += timestamp_ns() - start64;
 	}
-	printf("prefetcht0 + clflush: For a page, prefetcht0: %f ns, memcpy: %f ns, clflush: %f ns\n", (double)prefetch_time / (SIZE / PAGE_SIZE), (double)memcpy_time / (SIZE / PAGE_SIZE), (double)clflush_time / (SIZE / PAGE_SIZE));
+	printf("prefetcht0 + memcmp + clflush: For a page, prefetcht0: %f ns, memcmp: %f ns, clflush: %f ns\n", (double)prefetch_time / (SIZE / PAGE_SIZE), (double)memcmp_time / (SIZE / PAGE_SIZE), (double)clflush_time / (SIZE / PAGE_SIZE));
+
+	prefetch_time = 0;
+	memcmp_time = 0;
+	clflush_time = 0;
+	for (i = 0; i < SIZE; i += PAGE_SIZE) {
+		start64 = timestamp_ns();
+		for (j = 0; j < PAGE_SIZE; j += 64) {
+			my_prefetcht0(s + i + j);
+		}
+		prefetch_time += timestamp_ns() - start64;
+
+		start64 = timestamp_ns();
+		if (memcmp(buf, s + i, PAGE_SIZE) != 0) {
+			printf("WTF???\n");
+		}
+		memcmp_time += timestamp_ns() - start64;
+
+		start64 = timestamp_ns();
+		for (j = 0; j < PAGE_SIZE; j += 64) {
+			my_clflush_ro(s + i + j);
+		}
+		clflush_time += timestamp_ns() - start64;
+	}
+	printf("prefetcht0 + memcmp + clflush_ro: For a page, prefetcht0: %f ns, memcmp: %f ns, clflush: %f ns\n", (double)prefetch_time / (SIZE / PAGE_SIZE), (double)memcmp_time / (SIZE / PAGE_SIZE), (double)clflush_time / (SIZE / PAGE_SIZE));
 
 	return 0;
 }
