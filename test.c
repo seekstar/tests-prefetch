@@ -2,6 +2,13 @@
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
+#include <assert.h>
+
+#ifndef PRIszt
+// POSIX
+#define PRIszt "zu"
+// Windows is "Iu"
+#endif
 
 static inline void my_prefetchnta(const void *x) {
 	asm volatile("prefetchnta %0" : : "m" (*(const char *)x));
@@ -36,6 +43,27 @@ static inline uint64_t timestamp_ns() {
 
 #define SIZE (1 << 30)
 #define PAGE_SIZE 4096
+
+void prefetcht0_next_block_stride(const char *s, const char *buf, size_t num, size_t stride) {
+	assert(num * stride <= PAGE_SIZE);
+	assert(stride % 64 == 0);
+	uint64_t prefetch_time = 0;
+	uint64_t memcmp_time = 0;
+	for (size_t i = 0; i < SIZE - PAGE_SIZE; i += PAGE_SIZE) {
+		uint64_t start64 = timestamp_ns();
+		for (size_t j = 0; j < num * stride; j += stride) {
+			my_prefetcht0(s + i + 1 + j);
+		}
+		prefetch_time += timestamp_ns() - start64;
+
+		start64 = timestamp_ns();
+		if (memcmp(buf, s + i, PAGE_SIZE) != 0) {
+			printf("WTF???\n");
+		}
+		memcmp_time += timestamp_ns() - start64;
+	}
+	printf("prefetcht0 next block (num=%" PRIszt ", stride=%" PRIszt ") + memcmp: For a page, prefetcht0: %f ns, memcmp: %f ns\n", num, stride, (double)prefetch_time / (SIZE / PAGE_SIZE), (double)memcmp_time / (SIZE / PAGE_SIZE));
+}
 
 int main() {
 	static char s[SIZE];
@@ -183,6 +211,13 @@ int main() {
 		clflush_time += timestamp_ns() - start64;
 	}
 	printf("prefetcht0 + memcmp + clflush_ro: For a page, prefetcht0: %f ns, memcmp: %f ns, clflush: %f ns\n", (double)prefetch_time / (SIZE / PAGE_SIZE), (double)memcmp_time / (SIZE / PAGE_SIZE), (double)clflush_time / (SIZE / PAGE_SIZE));
+
+	// Seems like 8 prefetches are async. If more, then prefetches become sync
+	for (i = 64; i <= 512; i *= 2) {
+		for (j = 1; j <= PAGE_SIZE / i; j *= 2) {
+			prefetcht0_next_block_stride(s, buf, j, i);
+		}
+	}
 
 	return 0;
 }
